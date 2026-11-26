@@ -1,1 +1,353 @@
 
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Министерство здравоохранения</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#081522;color:#eaf2f5;font-family:Arial,sans-serif}
+header{padding:28px 16px;text-align:center;background:#10283a;border-bottom:2px solid #c9a44c}
+header h1{color:#e4c36d;margin:0 0 8px;font-size:25px}
+header p{color:#b6c8d2;margin:0}
+main{max-width:900px;margin:25px auto;padding:0 15px}
+.card{background:#102438;border:1px solid #25445a;border-radius:14px;padding:20px;margin-bottom:18px}
+h2{color:#e4c36d;margin-top:0;font-size:20px}
+input,textarea,button{width:100%;padding:12px;margin:7px 0;border-radius:8px;font-size:15px}
+input,textarea{background:#081a29;border:1px solid #35536a;color:white}
+button{background:#c9a44c;color:#101820;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#24445a;color:white}
+button:disabled{opacity:.5}
+.small{color:#9fb4c2;font-size:13px}
+.item{padding:12px 0;border-bottom:1px solid #294256}
+.item:last-child{border:0}
+.stat{color:#e4c36d;font-weight:bold}
+.hidden{display:none}
+#message{padding:10px;color:#e4c36d;white-space:pre-wrap}
+footer{text-align:center;color:#718b9c;padding:25px}
+</style>
+</head>
+<body>
+
+<header>
+<h1>МИНИСТЕРСТВО ЗДРАВООХРАНЕНИЯ</h1>
+<p>Hassle Online • Система учёта сотрудников</p>
+</header>
+
+<main>
+<div id="message"></div>
+
+<section class="card" id="auth">
+<h2>Вход в систему</h2>
+<input id="email" type="email" placeholder="Электронная почта">
+<input id="password" type="password" placeholder="Пароль">
+<button id="login">Войти</button>
+<button class="secondary" id="register">Зарегистрироваться</button>
+<p class="small">Используй свою электронную почту и придуманный пароль.</p>
+</section>
+
+<section class="card hidden" id="account">
+<h2>Личный кабинет</h2>
+<p id="userInfo"></p>
+<button class="secondary" id="logout">Выйти</button>
+</section>
+
+<section class="card hidden" id="submitCard">
+<h2>Отправить статистику</h2>
+<input id="nickname" placeholder="Ваш игровой ник">
+<input id="cards" type="number" min="0" placeholder="Выдано медкарт">
+<input id="patients" type="number" min="0" placeholder="Вылечено пациентов">
+<input id="proof" type="url" placeholder="Ссылка на доказательство (если есть)">
+<textarea id="comment" placeholder="Комментарий (необязательно)"></textarea>
+<button id="send">Отправить на проверку</button>
+</section>
+
+<section class="card hidden" id="mySubmissions">
+<h2>Мои заявки</h2>
+<div id="myList"></div>
+</section>
+
+<section class="card">
+<h2>Рейтинг сотрудников</h2>
+<p class="small">Учитываются только подтверждённые заявки.</p>
+<div id="rating">Загрузка...</div>
+</section>
+
+<section class="card hidden" id="adminPanel">
+<h2>Панель администратора</h2>
+<div id="pending">Загрузка заявок...</div>
+</section>
+
+<section class="card">
+<h2>История розыгрышей</h2>
+<div id="history">Загрузка...</div>
+</section>
+</main>
+
+<footer>Министерство здравоохранения • Hassle Online</footer>
+
+<script>
+const SUPABASE_URL = "ВСТАВЬ_СВОЙ_SUPABASE_URL";
+const SUPABASE_KEY = "ВСТАВЬ_СВОЙ_PUBLISHABLE_KEY";
+
+const message = document.getElementById("message");
+const say = text => message.textContent = text;
+
+let db;
+let currentUser = null;
+let isAdmin = false;
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;",
+    '"':"&quot;", "'":"&#39;"
+  })[c]);
+}
+
+async function init() {
+  try {
+    const url = SUPABASE_URL.trim().replace(/\/+$/, "");
+    const key = SUPABASE_KEY.trim();
+
+    if (!url.startsWith("https://") || !url.includes(".supabase.co")) {
+      throw new Error("Проверь SUPABASE_URL: нужен адрес проекта Supabase.");
+    }
+    if (!key || key.includes("ВСТАВЬ_")) {
+      throw new Error("Вставь свой Publishable key в код.");
+    }
+
+    db = window.supabase.createClient(url, key);
+
+    const {data, error} = await db.auth.getSession();
+    if (error) throw error;
+
+    if (data.session) {
+      await showAccount(data.session.user);
+    }
+
+    await loadRating();
+    await loadHistory();
+  } catch (e) {
+    say("Ошибка подключения: " + e.message);
+  }
+}
+
+async function showAccount(user) {
+  currentUser = user;
+  document.getElementById("auth").classList.add("hidden");
+  document.getElementById("account").classList.remove("hidden");
+  document.getElementById("submitCard").classList.remove("hidden");
+  document.getElementById("mySubmissions").classList.remove("hidden");
+  document.getElementById("userInfo").textContent =
+    "Вы вошли как: " + user.email;
+
+  await checkAdmin();
+  await loadMine();
+}
+
+async function checkAdmin() {
+  isAdmin = false;
+  const {data, error} = await db
+    .from("admin_users")
+    .select("user_id")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  if (!error && data) {
+    isAdmin = true;
+    document.getElementById("adminPanel").classList.remove("hidden");
+    await loadPending();
+  }
+}
+
+document.getElementById("register").onclick = async () => {
+  try {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    if (!email || password.length < 6) {
+      throw new Error("Укажи почту и пароль минимум из 6 символов.");
+    }
+
+    const {data, error} = await db.auth.signUp({email, password});
+    if (error) throw error;
+
+    if (data.session) {
+      await showAccount(data.user);
+      say("Регистрация прошла успешно!");
+    } else {
+      say("Проверь почту и подтверди регистрацию, затем войди.");
+    }
+  } catch (e) {
+    say("Ошибка регистрации: " + e.message);
+  }
+};
+
+document.getElementById("login").onclick = async () => {
+  try {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    const {data, error} = await db.auth.signInWithPassword({
+      email, password
+    });
+    if (error) throw error;
+
+    await showAccount(data.user);
+    say("Вы успешно вошли!");
+  } catch (e) {
+    say("Ошибка входа: " + e.message);
+  }
+};
+
+document.getElementById("logout").onclick = async () => {
+  await db.auth.signOut();
+  location.reload();
+};
+
+document.getElementById("send").onclick = async () => {
+  try {
+    const nickname = document.getElementById("nickname").value.trim();
+    const cards = Number(document.getElementById("cards").value);
+    const patients = Number(document.getElementById("patients").value);
+    const proof_url = document.getElementById("proof").value.trim();
+    const comment = document.getElementById("comment").value.trim();
+
+    if (!nickname) throw new Error("Укажи игровой ник.");
+    if (!Number.isInteger(cards) || !Number.isInteger(patients) ||
+        cards < 0 || patients < 0 || cards + patients <= 0) {
+      throw new Error("Укажи корректное количество медкарт и пациентов.");
+    }
+
+    const {error} = await db.from("submissions").insert({
+      user_id: currentUser.id,
+      nickname, cards, patients, proof_url, comment,
+      status: "pending"
+    });
+
+    if (error) throw error;
+
+    say("Статистика отправлена на проверку!");
+    document.getElementById("cards").value = "";
+    document.getElementById("patients").value = "";
+    document.getElementById("proof").value = "";
+    document.getElementById("comment").value = "";
+    await loadMine();
+  } catch (e) {
+    say("Ошибка отправки: " + e.message);
+  }
+};
+
+async function loadMine() {
+  const {data, error} = await db.from("submissions")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("created_at", {ascending:false});
+
+  if (error) {
+    document.getElementById("myList").textContent = error.message;
+    return;
+  }
+
+  document.getElementById("myList").innerHTML = data.length
+    ? data.map(s => `<div class="item">
+        <b>${escapeHTML(s.nickname)}</b><br>
+        Медкарты: ${s.cards} • Пациенты: ${s.patients}<br>
+        Статус: <span class="stat">${escapeHTML(s.status)}</span>
+      </div>`).join("")
+    : "Заявок пока нет.";
+}
+
+async function loadRating() {
+  const {data, error} = await db.from("submissions")
+    .select("nickname,cards,patients")
+    .eq("status", "approved");
+
+  if (error) {
+    document.getElementById("rating").textContent = error.message;
+    return;
+  }
+
+  const totals = {};
+  (data || []).forEach(s => {
+    const name = s.nickname;
+    if (!totals[name]) totals[name] = 0;
+    totals[name] += Number(s.cards) + Number(s.patients);
+  });
+
+  const sorted = Object.entries(totals)
+    .sort((a,b) => b[1] - a[1]);
+
+  document.getElementById("rating").innerHTML = sorted.length
+    ? sorted.map(([name,total],i) =>
+      `<div class="item">${i+1}. <b>${escapeHTML(name)}</b>
+       <span class="stat"> — ${total}</span></div>`
+    ).join("")
+    : "Подтверждённых результатов пока нет.";
+}
+
+async function loadPending() {
+  if (!isAdmin) return;
+
+  const {data, error} = await db.from("submissions")
+    .select("*")
+    .eq("status", "pending")
+    .order("created_at", {ascending:true});
+
+  if (error) {
+    document.getElementById("pending").textContent = error.message;
+    return;
+  }
+
+  document.getElementById("pending").innerHTML = data.length
+    ? data.map(s => `<div class="item">
+        <b>${escapeHTML(s.nickname)}</b><br>
+        Медкарты: ${s.cards} • Пациенты: ${s.patients}<br>
+        Комментарий: ${escapeHTML(s.comment || "—")}<br>
+        ${s.proof_url ? `<a target="_blank" rel="noopener" href="${escapeHTML(s.proof_url)}">Доказательство</a><br>` : ""}
+        <button onclick="review('${s.id}','approved')">Подтвердить</button>
+        <button class="secondary" onclick="review('${s.id}','rejected')">Отклонить</button>
+      </div>`).join("")
+    : "Новых заявок нет.";
+}
+
+window.review = async (id, status) => {
+  if (!isAdmin) return say("Нет прав администратора.");
+
+  const {error} = await db.from("submissions")
+    .update({status})
+    .eq("id", id);
+
+  if (error) return say("Ошибка: " + error.message);
+
+  say("Статус заявки изменён.");
+  await loadPending();
+  await loadRating();
+};
+
+async function loadHistory() {
+  const {data, error} = await db.from("draws")
+    .select("*")
+    .order("created_at", {ascending:false});
+
+  if (error) {
+    document.getElementById("history").textContent = error.message;
+    return;
+  }
+
+  document.getElementById("history").innerHTML = data.length
+    ? data.map(d => `<div class="item">
+        Дата: ${new Date(d.created_at).toLocaleString("ru-RU")}<br>
+        Победители: ${escapeHTML(
+          typeof d.winners === "string" ? d.winners : JSON.stringify(d.winners)
+        )}
+      </div>`).join("")
+    : "Розыгрышей пока нет.";
+}
+
+init();
+</script>
+</body>
+</html>
+
