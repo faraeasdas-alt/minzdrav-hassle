@@ -1,1 +1,442 @@
 
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Минздрав | Hassle Online</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root {
+  --bg:#07111f;
+  --panel:#112239;
+  --gold:#e8c477;
+  --teal:#55e0cf;
+  --text:#f4f7fb;
+  --muted:#9aabc0;
+}
+* {box-sizing:border-box}
+body {
+  margin:0;padding:24px 14px;
+  font-family:Arial,sans-serif;
+  color:var(--text);
+  background:radial-gradient(ellipse at top,#173653,var(--bg) 65%);
+  min-height:100vh;
+}
+header {text-align:center;padding:30px 10px}
+.logo {font-size:42px}
+h1 {color:var(--gold);font-size:30px;margin:12px 0}
+h2 {font-size:21px}
+p {color:var(--muted);line-height:1.6}
+.container {max-width:950px;margin:auto}
+.card {
+  background:linear-gradient(145deg,#172b42,#0e1b2d);
+  border:1px solid #29445d;border-radius:18px;
+  padding:22px;margin:18px 0;
+  box-shadow:0 12px 35px #0005;
+}
+input {
+  width:100%;padding:13px;margin:7px 0;
+  background:#091727;color:white;
+  border:1px solid #34516b;border-radius:9px;
+}
+button {
+  padding:12px 18px;border:0;border-radius:10px;
+  background:linear-gradient(135deg,#e8c477,#c99a45);
+  color:#172033;font-weight:bold;cursor:pointer;
+  margin:5px 3px;
+}
+button.secondary {background:#29445d;color:white}
+button:disabled {opacity:.5;cursor:not-allowed}
+nav {display:flex;flex-wrap:wrap;justify-content:center;gap:5px}
+nav button {background:#172b42;color:var(--text)}
+nav button.active {background:var(--gold);color:#172033}
+.hidden {display:none!important}
+.stat {
+  display:inline-block;background:#0a192a;
+  padding:15px;border-radius:12px;margin:5px;
+  min-width:125px;text-align:center;
+}
+.stat strong {display:block;font-size:25px;color:var(--teal)}
+.item {
+  padding:13px;border-bottom:1px solid #29445d;
+}
+.gold {color:var(--gold)}
+.small {font-size:13px;color:var(--muted)}
+#message {padding:10px;color:var(--teal)}
+footer {text-align:center;padding:25px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚕️</div>
+  <h1>МИНИСТЕРСТВО ЗДРАВООХРАНЕНИЯ</h1>
+  <p>Система достижений и розыгрышей сотрудников<br>Hassle Online</p>
+</header>
+
+<main class="container">
+
+<div class="card" id="auth">
+  <h2>🔐 Вход в систему</h2>
+  <input id="email" type="email" placeholder="Электронная почта">
+  <input id="password" type="password" placeholder="Пароль">
+  <button onclick="signIn()">Войти</button>
+  <button class="secondary" onclick="signUp()">Регистрация</button>
+  <p class="small">Для регистрации используй свою электронную почту.</p>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card">
+    <p>Вы вошли в систему</p>
+    <strong id="username"></strong>
+    <button class="secondary" onclick="signOut()">Выйти</button>
+  </div>
+
+  <nav>
+    <button class="active" onclick="showTab('home',this)">Главная</button>
+    <button onclick="showTab('submit',this)">Моя статистика</button>
+    <button onclick="showTab('rating',this)">Рейтинг</button>
+    <button onclick="showTab('history',this)">Розыгрыши</button>
+    <button id="adminTab" class="hidden" onclick="showTab('admin',this)">Администратор</button>
+  </nav>
+
+  <section id="home" class="tab">
+    <div class="card">
+      <h2>Добро пожаловать!</h2>
+      <p>Здесь учитываются медицинские карты и вылеченные пациенты сотрудников.</p>
+      <div class="stat"><strong id="totalCards">0</strong>Медкарты</div>
+      <div class="stat"><strong id="totalPatients">0</strong>Пациенты</div>
+      <div class="stat"><strong id="totalWorkers">0</strong>Сотрудники</div>
+    </div>
+  </section>
+
+  <section id="submit" class="tab hidden">
+    <div class="card">
+      <h2>📋 Отправить статистику</h2>
+      <input id="nickname" placeholder="Игровой никнейм">
+      <input id="cards" type="number" min="0" placeholder="Количество медкарт">
+      <input id="patients" type="number" min="0" placeholder="Количество вылеченных пациентов">
+      <input id="proof" type="url" placeholder="Ссылка на подтверждение (если есть)">
+      <input id="comment" placeholder="Комментарий (необязательно)">
+      <button onclick="submitStats()">Отправить на проверку</button>
+      <p class="small">После отправки заявка будет ожидать проверки администратора.</p>
+    </div>
+    <div class="card">
+      <h2>Мои заявки</h2>
+      <div id="mySubmissions">Загрузка...</div>
+    </div>
+  </section>
+
+  <section id="rating" class="tab hidden">
+    <div class="card">
+      <h2>🏆 Рейтинг сотрудников</h2>
+      <p>Учитываются только одобренные заявки. Очки = медкарты + пациенты.</p>
+      <div id="ratingList">Загрузка...</div>
+    </div>
+  </section>
+
+  <section id="history" class="tab hidden">
+    <div class="card">
+      <h2>🎁 История розыгрышей</h2>
+      <div id="drawHistory">Загрузка...</div>
+    </div>
+  </section>
+
+  <section id="admin" class="tab hidden">
+    <div class="card">
+      <h2>👑 Панель администратора</h2>
+      <p>Проверка заявок сотрудников.</p>
+      <div id="pendingList">Загрузка...</div>
+    </div>
+    <div class="card">
+      <h2>Розыгрыш</h2>
+      <p>Розыгрыш будет доступен после подключения защищённой серверной функции.</p>
+      <button disabled>Провести розыгрыш</button>
+    </div>
+  </section>
+</div>
+
+<div id="message"></div>
+</main>
+
+<footer>Минздрав Hassle Online · Система учёта достижений</footer>
+
+<script>
+const SUPABASE_URL = "ВСТАВЬ_PROJECT_URL";
+const SUPABASE_KEY = "ВСТАВЬ_PUBLISHABLE_KEY";
+
+const db = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+
+let currentUser = null;
+let isAdmin = false;
+
+function msg(text) {
+  document.getElementById("message").textContent = text;
+}
+
+function showTab(id, button) {
+  document.querySelectorAll(".tab").forEach(x => x.classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  button.classList.add("active");
+
+  if(id === "rating") loadRating();
+  if(id === "history") loadHistory();
+  if(id === "admin" && isAdmin) loadPending();
+  if(id === "submit") loadMine();
+  if(id === "home") loadOverview();
+}
+
+async function signUp() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+
+  if(!email || password.length < 6) {
+    return msg("Укажи почту и пароль не короче 6 символов.");
+  }
+
+  const {error} = await db.auth.signUp({email,password});
+  if(error) return msg(error.message);
+  msg("Регистрация отправлена. Если требуется, подтверди почту.");
+}
+
+async function signIn() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+
+  const {error} = await db.auth.signInWithPassword({email,password});
+  if(error) return msg(error.message);
+
+  await startApp();
+}
+
+async function signOut() {
+  await db.auth.signOut();
+  location.reload();
+}
+
+async function startApp() {
+  const {data} = await db.auth.getUser();
+  currentUser = data.user;
+
+  if(!currentUser) return;
+
+  document.getElementById("auth").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  document.getElementById("username").textContent = currentUser.email;
+
+  const {data: admin} = await db
+    .from("admin_users")
+    .select("user_id")
+    .eq("user_id",currentUser.id)
+    .maybeSingle();
+
+  isAdmin = !!admin;
+
+  if(isAdmin) document.getElementById("adminTab").classList.remove("hidden");
+
+  await loadOverview();
+}
+
+async function submitStats() {
+  const nickname = document.getElementById("nickname").value.trim();
+  const cards = Number(document.getElementById("cards").value);
+  const patients = Number(document.getElementById("patients").value);
+  const proof = document.getElementById("proof").value.trim();
+  const comment = document.getElementById("comment").value.trim();
+
+  if(!nickname || !Number.isInteger(cards) || !Number.isInteger(patients)
+     || cards < 0 || patients < 0 || cards + patients === 0) {
+    return msg("Проверь никнейм и количество показателей.");
+  }
+
+  const {error} = await db.from("submissions").insert({
+    user_id:currentUser.id,
+    nickname,cards,patients,
+    proof_url:proof || null,
+    comment:comment || null,
+    status:"pending"
+  });
+
+  if(error) return msg(error.message);
+
+  msg("Заявка отправлена на проверку!");
+  document.getElementById("nickname").value = "";
+  document.getElementById("cards").value = "";
+  document.getElementById("patients").value = "";
+  document.getElementById("proof").value = "";
+  document.getElementById("comment").value = "";
+  await loadMine();
+}
+
+async function loadMine() {
+  const box = document.getElementById("mySubmissions");
+  const {data,error} = await db.from("submissions")
+    .select("*")
+    .eq("user_id",currentUser.id)
+    .order("created_at",{ascending:false});
+
+  if(error) return box.textContent = error.message;
+  box.innerHTML = "";
+
+  if(!data.length) {
+    box.textContent = "Заявок пока нет.";
+    return;
+  }
+
+  data.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "item";
+    div.textContent =
+      `${s.nickname}: ${s.cards} медкарт, ${s.patients} пациентов — ${s.status}`;
+    box.appendChild(div);
+  });
+}
+
+async function loadOverview() {
+  const {data,error} = await db.from("submissions")
+    .select("nickname,cards,patients")
+    .eq("status","approved");
+
+  if(error) return msg(error.message);
+
+  const rows = data || [];
+  document.getElementById("totalCards").textContent =
+    rows.reduce((a,x)=>a+Number(x.cards),0);
+  document.getElementById("totalPatients").textContent =
+    rows.reduce((a,x)=>a+Number(x.patients),0);
+  document.getElementById("totalWorkers").textContent =
+    new Set(rows.map(x=>x.nickname)).size;
+}
+
+async function loadRating() {
+  const box = document.getElementById("ratingList");
+  const {data,error} = await db.from("submissions")
+    .select("nickname,cards,patients")
+    .eq("status","approved");
+
+  if(error) return box.textContent = error.message;
+
+  const totals = {};
+  (data || []).forEach(s => {
+    if(!totals[s.nickname]) totals[s.nickname] = {cards:0,patients:0};
+    totals[s.nickname].cards += Number(s.cards);
+    totals[s.nickname].patients += Number(s.patients);
+  });
+
+  const list = Object.entries(totals)
+    .map(([name,v])=>({name,...v,points:v.cards+v.patients}))
+    .sort((a,b)=>b.points-a.points);
+
+  box.innerHTML = "";
+  if(!list.length) return box.textContent = "Пока нет одобренных заявок.";
+
+  list.forEach((x,i)=>{
+    const div = document.createElement("div");
+    div.className = "item";
+    const title = document.createElement("strong");
+    title.textContent = `${i+1}. ${x.name}`;
+    const details = document.createElement("div");
+    details.className = "small";
+    details.textContent =
+      `${x.cards} медкарт · ${x.patients} пациентов · ${x.points} очков`;
+    div.append(title,details);
+    box.appendChild(div);
+  });
+}
+
+async function loadPending() {
+  const box = document.getElementById("pendingList");
+  if(!isAdmin) return box.textContent = "Нет доступа.";
+
+  const {data,error} = await db.from("submissions")
+    .select("*")
+    .eq("status","pending")
+    .order("created_at",{ascending:true});
+
+  if(error) return box.textContent = error.message;
+  box.innerHTML = "";
+
+  if(!data.length) return box.textContent = "Новых заявок нет.";
+
+  data.forEach(s=>{
+    const div = document.createElement("div");
+    div.className = "item";
+
+    const info = document.createElement("p");
+    info.textContent =
+      `${s.nickname}: ${s.cards} медкарт, ${s.patients} пациентов. ${s.comment || ""}`;
+
+    const approve = document.createElement("button");
+    approve.textContent = "Одобрить";
+    approve.onclick = ()=>reviewSubmission(s.id,"approved");
+
+    const reject = document.createElement("button");
+    reject.textContent = "Отклонить";
+    reject.className = "secondary";
+    reject.onclick = ()=>reviewSubmission(s.id,"rejected");
+
+    div.append(info,approve,reject);
+
+    if(s.proof_url) {
+      const link = document.createElement("a");
+      link.href = s.proof_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Открыть подтверждение";
+      link.style.color = "#55e0cf";
+      div.appendChild(link);
+    }
+
+    box.appendChild(div);
+  });
+}
+
+async function reviewSubmission(id,status) {
+  if(!isAdmin) return msg("Нет доступа.");
+
+  const {error} = await db.from("submissions")
+    .update({status})
+    .eq("id",id);
+
+  if(error) return msg(error.message);
+  msg("Статус заявки изменён.");
+  await loadPending();
+}
+
+async function loadHistory() {
+  const box = document.getElementById("drawHistory");
+  const {data,error} = await db.from("draws")
+    .select("*")
+    .order("created_at",{ascending:false});
+
+  if(error) return box.textContent = error.message;
+  box.innerHTML = "";
+
+  if(!data.length) return box.textContent = "Розыгрышей пока нет.";
+
+  data.forEach(d=>{
+    const div = document.createElement("div");
+    div.className = "item";
+    const date = new Date(d.created_at).toLocaleString("ru-RU");
+    const winners = typeof d.winners === "string"
+      ? d.winners : JSON.stringify(d.winners);
+    div.textContent = date + " — " + winners;
+    box.appendChild(div);
+  });
+}
+
+db.auth.onAuthStateChange((event,session)=>{
+  if(session && !currentUser) {
+    setTimeout(()=>startApp(),0);
+  }
+});
+
+startApp();
+</script>
+</body>
+</html>
